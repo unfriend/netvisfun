@@ -453,7 +453,7 @@
                     if (w.target !== null && nodes[w.target]) {
                          const p1 = nodes[w.current].mesh.position;
                          const p2 = nodes[w.target].mesh.position;
-                         if (p1.distanceToSq(p2) > 0.001) {
+                         if (p1.distanceToSquared(p2) > 0.001) { // FIXED: distanceToSq -> distanceToSquared
                              dir.subVectors(p2, p1).normalize();
                          }
                     }
