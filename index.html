@@ -431,6 +431,19 @@
                 btnImmersive.style.color = "#ffcccc";
                 btnImmersive.style.boxShadow = "0 0 10px #ff0000";
 
+                // --- Auto-configure for Immersive Experience ---
+                // 1. Set Speed to 0.005 (Slow & Cinematic)
+                config.walkerSpeed = 0.005;
+                inpSpeed.value = "0.005";
+                valSpeed.innerText = "0.005";
+
+                // 2. Enable Cam Follow
+                isCamFollowOn = true;
+                btnCamFollow.innerText = "Cam Follow: ON";
+                btnCamFollow.style.borderColor = "#00ff00";
+                btnCamFollow.style.color = "#00ff00";
+                // -----------------------------------------------
+
                 savedCameraPos.copy(camera.position);
                 savedControlsTarget.copy(controls.target);
 
