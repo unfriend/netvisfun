@@ -794,7 +794,9 @@
                 node.mesh.material.color.setHex(COLOR_NODE_VISITED);
                 node.mesh.material.opacity = 1.0;
                 
-                node.labelDiv.classList.add('visited');
+                // Removed label class change so it stays the same
+                // node.labelDiv.classList.add('visited');
+                
                 node.mesh.scale.set(1.5, 1.5, 1.5);
 
                 // Check for System Completion
