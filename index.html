@@ -18,6 +18,58 @@
             max-width: 300px;
         }
         .stat { color: #00ffff; font-weight: bold; }
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border: 1px solid #444;
+            max-width: 280px;
+        }
+        #controls h3 {
+            margin: 0 0 10px 0;
+            color: #00ffff;
+        }
+        .control-group {
+            margin-bottom: 12px;
+        }
+        .control-group label {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 0.85em;
+            color: #aaa;
+        }
+        .control-group input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+        }
+        .control-group .value {
+            font-size: 0.8em;
+            color: #00ffff;
+            float: right;
+        }
+        .control-btn {
+            background: #222;
+            color: #fff;
+            border: 1px solid #444;
+            padding: 8px 16px;
+            margin-right: 8px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.9em;
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .control-btn:hover {
+            background: #333;
+            border-color: #00ffff;
+        }
+        .control-btn.active {
+            background: #00ffff;
+            color: #000;
+        }
     </style>
     <!-- Import Map for Three.js -->
     <script type="importmap">
@@ -32,7 +84,7 @@
 <body>
     <div id="info">
         <h3>Network Walker</h3>
-        <p>Nodes Visited: <span id="visited-count" class="stat">0</span> / 40</p>
+        <p>Nodes Visited: <span id="visited-count" class="stat">0</span> / <span id="total-nodes" class="stat">40</span></p>
         <p>Steps Taken: <span id="step-count" class="stat">0</span></p>
         <div style="font-size: 0.8em; color: #aaa;">
             <p>• Green: Unvisited Node</p>
@@ -41,15 +93,36 @@
         </div>
     </div>
 
+    <div id="controls">
+        <h3>Controls</h3>
+        <div class="control-group">
+            <button id="pause-btn" class="control-btn">Pause</button>
+            <button id="reset-btn" class="control-btn">Reset</button>
+        </div>
+        <div class="control-group">
+            <label>Walker Speed <span id="speed-value" class="value">0.015</span></label>
+            <input type="range" id="speed-slider" min="0.001" max="0.05" step="0.001" value="0.015">
+        </div>
+        <div class="control-group">
+            <label>Node Count <span id="node-count-value" class="value">40</span></label>
+            <input type="range" id="node-count-slider" min="10" max="100" step="5" value="40">
+        </div>
+        <div class="control-group">
+            <label>Link Count <span id="link-count-value" class="value">400</span></label>
+            <input type="range" id="link-count-slider" min="20" max="800" step="20" value="400">
+        </div>
+        <p style="font-size: 0.75em; color: #666; margin-top: 10px;">Adjust node/link count and press Reset to apply.</p>
+    </div>
+
     <script type="module">
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
         // --- Configuration ---
-        const NODE_COUNT = 40;
-        const LINK_COUNT = 400;
+        let NODE_COUNT = 40;
+        let LINK_COUNT = 400;
         const WORLD_RADIUS = 30;
-        const WALKER_SPEED = 0.015; // 0 to 1 (progress per frame)
+        let WALKER_SPEED = 0.015; // 0 to 1 (progress per frame)
 
         // Colors
         const COLOR_BG = 0x050505;
@@ -71,17 +144,232 @@
         let walkProgress = 0;
         let visitedCount = 0;
         let totalSteps = 0;
+        let isPaused = false;
         
         // DOM Elements
         const uiVisited = document.getElementById('visited-count');
         const uiSteps = document.getElementById('step-count');
+        const uiTotalNodes = document.getElementById('total-nodes');
+        
+        // Control Elements
+        const pauseBtn = document.getElementById('pause-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const speedSlider = document.getElementById('speed-slider');
+        const speedValue = document.getElementById('speed-value');
+        const nodeCountSlider = document.getElementById('node-count-slider');
+        const nodeCountValue = document.getElementById('node-count-value');
+        const linkCountSlider = document.getElementById('link-count-slider');
+        const linkCountValue = document.getElementById('link-count-value');
 
         // Walker Visuals
         let walkerMesh;
         let walkerLight;
 
         init();
+        setupControls();
         animate();
+
+        function setupControls() {
+            // Pause/Play button
+            pauseBtn.addEventListener('click', () => {
+                isPaused = !isPaused;
+                pauseBtn.textContent = isPaused ? 'Play' : 'Pause';
+                pauseBtn.classList.toggle('active', isPaused);
+            });
+
+            // Reset button
+            resetBtn.addEventListener('click', () => {
+                resetSimulation();
+            });
+
+            // Speed slider
+            speedSlider.addEventListener('input', (e) => {
+                WALKER_SPEED = parseFloat(e.target.value);
+                speedValue.textContent = WALKER_SPEED.toFixed(3);
+            });
+
+            // Node count slider
+            nodeCountSlider.addEventListener('input', (e) => {
+                nodeCountValue.textContent = e.target.value;
+            });
+
+            // Link count slider
+            linkCountSlider.addEventListener('input', (e) => {
+                linkCountValue.textContent = e.target.value;
+            });
+        }
+
+        function resetSimulation() {
+            // Get new values from sliders
+            NODE_COUNT = parseInt(nodeCountSlider.value);
+            LINK_COUNT = parseInt(linkCountSlider.value);
+
+            // Dispose and clear existing objects from scene
+            nodes.forEach(node => {
+                node.mesh.geometry.dispose();
+                node.mesh.material.dispose();
+                scene.remove(node.mesh);
+            });
+            links.forEach(link => {
+                link.mesh.geometry.dispose();
+                link.mesh.material.dispose();
+                scene.remove(link.mesh);
+            });
+            if (walkerMesh) {
+                walkerMesh.geometry.dispose();
+                walkerMesh.material.dispose();
+                scene.remove(walkerMesh);
+            }
+
+            // Reset arrays
+            nodes = [];
+            links = [];
+
+            // Reset walk state
+            currentNodeIndex = 0;
+            targetNodeIndex = null;
+            currentLinkIndex = null;
+            walkProgress = 0;
+            visitedCount = 0;
+            totalSteps = 0;
+            isPaused = false;
+
+            // Update UI
+            uiVisited.innerText = '0';
+            uiSteps.innerText = '0';
+            uiTotalNodes.innerText = NODE_COUNT;
+            pauseBtn.textContent = 'Pause';
+            pauseBtn.classList.remove('active');
+
+            // Rebuild the network
+            buildNetwork();
+        }
+
+        function buildNetwork() {
+            // Generate Nodes
+            const nodeGeometry = new THREE.SphereGeometry(1.2, 16, 16);
+            
+            for (let i = 0; i < NODE_COUNT; i++) {
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos((Math.random() * 2) - 1);
+                const r = WORLD_RADIUS * Math.cbrt(Math.random());
+
+                const x = r * Math.sin(phi) * Math.cos(theta);
+                const y = r * Math.sin(phi) * Math.sin(theta);
+                const z = r * Math.cos(phi);
+
+                const material = new THREE.MeshStandardMaterial({
+                    color: COLOR_NODE_UNVISITED,
+                    roughness: 0.4,
+                    metalness: 0.8,
+                    emissive: COLOR_NODE_UNVISITED,
+                    emissiveIntensity: 0.2
+                });
+
+                const mesh = new THREE.Mesh(nodeGeometry, material);
+                mesh.position.set(x, y, z);
+                scene.add(mesh);
+
+                nodes.push({
+                    id: i,
+                    mesh: mesh,
+                    neighbors: [],
+                    links: [],
+                    isVisited: false
+                });
+            }
+
+            // Generate Links
+            const connectionSet = new Set();
+            const linkMaterialTemplate = new THREE.LineBasicMaterial({ 
+                color: COLOR_LINK_DIM, 
+                transparent: true, 
+                opacity: 0.1,
+                blending: THREE.AdditiveBlending 
+            });
+
+            // Limit link count to maximum possible unique connections
+            const maxLinks = (NODE_COUNT * (NODE_COUNT - 1)) / 2;
+            const actualLinkCount = Math.min(LINK_COUNT, maxLinks);
+
+            let linksCreated = 0;
+            let attempts = 0;
+            const maxAttempts = actualLinkCount * 10;
+
+            while (linksCreated < actualLinkCount && attempts < maxAttempts) {
+                attempts++;
+                const sourceIdx = Math.floor(Math.random() * NODE_COUNT);
+                const targetIdx = Math.floor(Math.random() * NODE_COUNT);
+
+                if (sourceIdx === targetIdx) continue;
+
+                const key = sourceIdx < targetIdx ? `${sourceIdx}-${targetIdx}` : `${targetIdx}-${sourceIdx}`;
+                if (connectionSet.has(key)) continue;
+
+                connectionSet.add(key);
+
+                nodes[sourceIdx].neighbors.push(targetIdx);
+                nodes[targetIdx].neighbors.push(sourceIdx);
+
+                const p1 = nodes[sourceIdx].mesh.position;
+                const p2 = nodes[targetIdx].mesh.position;
+                
+                const geometry = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+                const material = linkMaterialTemplate.clone(); 
+                
+                const line = new THREE.Line(geometry, material);
+                scene.add(line);
+
+                const linkObj = {
+                    mesh: line,
+                    source: sourceIdx,
+                    target: targetIdx,
+                    activeDecay: 0
+                };
+
+                links.push(linkObj);
+                nodes[sourceIdx].links.push(linkObj);
+                nodes[targetIdx].links.push(linkObj);
+
+                linksCreated++;
+            }
+
+            // Ensure connectivity for isolated nodes
+            nodes.forEach((node, idx) => {
+                if (node.neighbors.length === 0 && idx !== 0) {
+                    const target = 0;
+                    nodes[idx].neighbors.push(target);
+                    nodes[target].neighbors.push(idx);
+                    
+                    const p1 = nodes[idx].mesh.position;
+                    const p2 = nodes[target].mesh.position;
+                    const geometry = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+                    const material = linkMaterialTemplate.clone();
+                    const line = new THREE.Line(geometry, material);
+                    scene.add(line);
+                    
+                    const linkObj = { mesh: line, source: idx, target: target, activeDecay: 0 };
+                    links.push(linkObj);
+                    nodes[idx].links.push(linkObj);
+                    nodes[target].links.push(linkObj);
+                }
+            });
+
+            // Walker Setup
+            const walkerGeo = new THREE.SphereGeometry(0.8, 8, 8);
+            const walkerMat = new THREE.MeshBasicMaterial({ color: COLOR_WALKER });
+            walkerMesh = new THREE.Mesh(walkerGeo, walkerMat);
+            scene.add(walkerMesh);
+
+            walkerLight = new THREE.PointLight(COLOR_WALKER, 2, 15);
+            walkerMesh.add(walkerLight);
+
+            // Initialize Walk
+            currentNodeIndex = Math.floor(Math.random() * NODE_COUNT);
+            visitNode(currentNodeIndex);
+            walkerMesh.position.copy(nodes[currentNodeIndex].mesh.position);
+            pickNextTarget();
+        }
 
         function init() {
             // 1. Setup Scene
@@ -106,129 +394,8 @@
             const ambientLight = new THREE.AmbientLight(0x404040);
             scene.add(ambientLight);
 
-            // 2. Generate Nodes
-            const nodeGeometry = new THREE.SphereGeometry(1.2, 16, 16);
-            
-            for (let i = 0; i < NODE_COUNT; i++) {
-                // Random position inside a sphere
-                const theta = Math.random() * Math.PI * 2;
-                const phi = Math.acos((Math.random() * 2) - 1);
-                const r = WORLD_RADIUS * Math.cbrt(Math.random()); // Cubic root for uniform distribution
-
-                const x = r * Math.sin(phi) * Math.cos(theta);
-                const y = r * Math.sin(phi) * Math.sin(theta);
-                const z = r * Math.cos(phi);
-
-                const material = new THREE.MeshStandardMaterial({
-                    color: COLOR_NODE_UNVISITED,
-                    roughness: 0.4,
-                    metalness: 0.8,
-                    emissive: COLOR_NODE_UNVISITED,
-                    emissiveIntensity: 0.2
-                });
-
-                const mesh = new THREE.Mesh(nodeGeometry, material);
-                mesh.position.set(x, y, z);
-                scene.add(mesh);
-
-                nodes.push({
-                    id: i,
-                    mesh: mesh,
-                    neighbors: [], // Adjacency list stored as neighbor indices
-                    links: [],      // References to link objects
-                    isVisited: false
-                });
-            }
-
-            // 3. Generate Links
-            // We want a dense graph, but we don't want duplicate links between same pairs
-            const connectionSet = new Set();
-            const linkMaterialTemplate = new THREE.LineBasicMaterial({ 
-                color: COLOR_LINK_DIM, 
-                transparent: true, 
-                opacity: 0.1,
-                blending: THREE.AdditiveBlending 
-            });
-
-            let linksCreated = 0;
-            while (linksCreated < LINK_COUNT) {
-                const sourceIdx = Math.floor(Math.random() * NODE_COUNT);
-                const targetIdx = Math.floor(Math.random() * NODE_COUNT);
-
-                if (sourceIdx === targetIdx) continue;
-
-                // Create a unique key to check for existing connections (undirected)
-                const key = sourceIdx < targetIdx ? `${sourceIdx}-${targetIdx}` : `${targetIdx}-${sourceIdx}`;
-                if (connectionSet.has(key)) continue;
-
-                connectionSet.add(key);
-
-                // Register neighbors
-                nodes[sourceIdx].neighbors.push(targetIdx);
-                nodes[targetIdx].neighbors.push(sourceIdx);
-
-                // Create Visual Line
-                const p1 = nodes[sourceIdx].mesh.position;
-                const p2 = nodes[targetIdx].mesh.position;
-                
-                const geometry = new THREE.BufferGeometry().setFromPoints([p1, p2]);
-                // Clone material so we can light up individual links
-                const material = linkMaterialTemplate.clone(); 
-                
-                const line = new THREE.Line(geometry, material);
-                scene.add(line);
-
-                const linkObj = {
-                    mesh: line,
-                    source: sourceIdx,
-                    target: targetIdx,
-                    activeDecay: 0 // Used for animation
-                };
-
-                links.push(linkObj);
-                
-                // Store reference in nodes to find the specific link easily later
-                nodes[sourceIdx].links.push(linkObj);
-                nodes[targetIdx].links.push(linkObj);
-
-                linksCreated++;
-            }
-
-            // Ensure graph is connected enough (handle isolated nodes simply by connecting them to 0)
-            nodes.forEach((node, idx) => {
-                if (node.neighbors.length === 0 && idx !== 0) {
-                    const target = 0;
-                    nodes[idx].neighbors.push(target);
-                    nodes[target].neighbors.push(idx);
-                    
-                    const p1 = nodes[idx].mesh.position;
-                    const p2 = nodes[target].mesh.position;
-                    const geometry = new THREE.BufferGeometry().setFromPoints([p1, p2]);
-                    const material = linkMaterialTemplate.clone();
-                    const line = new THREE.Line(geometry, material);
-                    scene.add(line);
-                    
-                    const linkObj = { mesh: line, source: idx, target: target, activeDecay: 0 };
-                    links.push(linkObj);
-                    nodes[idx].links.push(linkObj);
-                    nodes[target].links.push(linkObj);
-                }
-            });
-
-            // 4. Walker Setup
-            const walkerGeo = new THREE.SphereGeometry(0.8, 8, 8);
-            const walkerMat = new THREE.MeshBasicMaterial({ color: COLOR_WALKER });
-            walkerMesh = new THREE.Mesh(walkerGeo, walkerMat);
-            scene.add(walkerMesh);
-
-            walkerLight = new THREE.PointLight(COLOR_WALKER, 2, 15);
-            walkerMesh.add(walkerLight);
-
-            // Initialize Walk
-            currentNodeIndex = Math.floor(Math.random() * NODE_COUNT);
-            visitNode(currentNodeIndex);
-            walkerMesh.position.copy(nodes[currentNodeIndex].mesh.position);
-            pickNextTarget();
+            // Build the network (nodes, links, walker)
+            buildNetwork();
 
             // Resize Handler
             window.addEventListener('resize', onWindowResize);
@@ -298,22 +465,25 @@
             requestAnimationFrame(animate);
             controls.update();
 
-            // 1. Walk Logic
-            if (targetNodeIndex !== null) {
-                walkProgress += WALKER_SPEED;
+            // Skip walk logic if paused
+            if (!isPaused) {
+                // 1. Walk Logic
+                if (targetNodeIndex !== null) {
+                    walkProgress += WALKER_SPEED;
 
-                const p1 = nodes[currentNodeIndex].mesh.position;
-                const p2 = nodes[targetNodeIndex].mesh.position;
+                    const p1 = nodes[currentNodeIndex].mesh.position;
+                    const p2 = nodes[targetNodeIndex].mesh.position;
 
-                // Interpolate Walker Position
-                walkerMesh.position.lerpVectors(p1, p2, walkProgress);
+                    // Interpolate Walker Position
+                    walkerMesh.position.lerpVectors(p1, p2, walkProgress);
 
-                // Arrival
-                if (walkProgress >= 1) {
-                    walkerMesh.position.copy(p2);
-                    currentNodeIndex = targetNodeIndex;
-                    visitNode(currentNodeIndex);
-                    pickNextTarget();
+                    // Arrival
+                    if (walkProgress >= 1) {
+                        walkerMesh.position.copy(p2);
+                        currentNodeIndex = targetNodeIndex;
+                        visitNode(currentNodeIndex);
+                        pickNextTarget();
+                    }
                 }
             }
 
