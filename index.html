@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Network Random Walk</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            pointer-events: none;
+            border: 1px solid #444;
+            max-width: 300px;
+        }
+        .stat { color: #00ffff; font-weight: bold; }
+    </style>
+    <!-- Import Map for Three.js -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="info">
+        <h3>Network Walker</h3>
+        <p>Nodes Visited: <span id="visited-count" class="stat">0</span> / 40</p>
+        <p>Steps Taken: <span id="step-count" class="stat">0</span></p>
+        <div style="font-size: 0.8em; color: #aaa;">
+            <p>• Green: Unvisited Node</p>
+            <p>• Pink/Purple: Visited Node</p>
+            <p>• White: Active Walker</p>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- Configuration ---
+        const NODE_COUNT = 40;
+        const LINK_COUNT = 400;
+        const WORLD_RADIUS = 30;
+        const WALKER_SPEED = 0.015; // 0 to 1 (progress per frame)
+
+        // Colors
+        const COLOR_BG = 0x050505;
+        const COLOR_NODE_UNVISITED = 0x004400;
+        const COLOR_NODE_VISITED = 0xff0055;
+        const COLOR_LINK_DIM = 0xffffff;
+        const COLOR_LINK_ACTIVE = 0x00ffff;
+        const COLOR_WALKER = 0xffffff;
+
+        // --- Global Variables ---
+        let scene, camera, renderer, controls;
+        let nodes = []; // Array of { mesh, id, neighbors: [], isVisited }
+        let links = []; // Array of { mesh, sourceNode, targetNode, geometry, material }
+        
+        // Random Walk State
+        let currentNodeIndex = 0;
+        let targetNodeIndex = null;
+        let currentLinkIndex = null;
+        let walkProgress = 0;
+        let visitedCount = 0;
+        let totalSteps = 0;
+        
+        // DOM Elements
+        const uiVisited = document.getElementById('visited-count');
+        const uiSteps = document.getElementById('step-count');
+
+        // Walker Visuals
+        let walkerMesh;
+        let walkerLight;
+
+        init();
+        animate();
+
+        function init() {
+            // 1. Setup Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(COLOR_BG);
+            scene.fog = new THREE.FogExp2(COLOR_BG, 0.015);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(40, 20, 50);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.autoRotate = true;
+            controls.autoRotateSpeed = 0.5;
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0x404040);
+            scene.add(ambientLight);
+
+            // 2. Generate Nodes
+            const nodeGeometry = new THREE.SphereGeometry(1.2, 16, 16);
+            
+            for (let i = 0; i < NODE_COUNT; i++) {
+                // Random position inside a sphere
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos((Math.random() * 2) - 1);
+                const r = WORLD_RADIUS * Math.cbrt(Math.random()); // Cubic root for uniform distribution
+
+                const x = r * Math.sin(phi) * Math.cos(theta);
+                const y = r * Math.sin(phi) * Math.sin(theta);
+                const z = r * Math.cos(phi);
+
+                const material = new THREE.MeshStandardMaterial({
+                    color: COLOR_NODE_UNVISITED,
+                    roughness: 0.4,
+                    metalness: 0.8,
+                    emissive: COLOR_NODE_UNVISITED,
+                    emissiveIntensity: 0.2
+                });
+
+                const mesh = new THREE.Mesh(nodeGeometry, material);
+                mesh.position.set(x, y, z);
+                scene.add(mesh);
+
+                nodes.push({
+                    id: i,
+                    mesh: mesh,
+                    neighbors: [], // Adjacency list stored as neighbor indices
+                    links: [],      // References to link objects
+                    isVisited: false
+                });
+            }
+
+            // 3. Generate Links
+            // We want a dense graph, but we don't want duplicate links between same pairs
+            const connectionSet = new Set();
+            const linkMaterialTemplate = new THREE.LineBasicMaterial({ 
+                color: COLOR_LINK_DIM, 
+                transparent: true, 
+                opacity: 0.1,
+                blending: THREE.AdditiveBlending 
+            });
+
+            let linksCreated = 0;
+            while (linksCreated < LINK_COUNT) {
+                const sourceIdx = Math.floor(Math.random() * NODE_COUNT);
+                const targetIdx = Math.floor(Math.random() * NODE_COUNT);
+
+                if (sourceIdx === targetIdx) continue;
+
+                // Create a unique key to check for existing connections (undirected)
+                const key = sourceIdx < targetIdx ? `${sourceIdx}-${targetIdx}` : `${targetIdx}-${sourceIdx}`;
+                if (connectionSet.has(key)) continue;
+
+                connectionSet.add(key);
+
+                // Register neighbors
+                nodes[sourceIdx].neighbors.push(targetIdx);
+                nodes[targetIdx].neighbors.push(sourceIdx);
+
+                // Create Visual Line
+                const p1 = nodes[sourceIdx].mesh.position;
+                const p2 = nodes[targetIdx].mesh.position;
+                
+                const geometry = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+                // Clone material so we can light up individual links
+                const material = linkMaterialTemplate.clone(); 
+                
+                const line = new THREE.Line(geometry, material);
+                scene.add(line);
+
+                const linkObj = {
+                    mesh: line,
+                    source: sourceIdx,
+                    target: targetIdx,
+                    activeDecay: 0 // Used for animation
+                };
+
+                links.push(linkObj);
+                
+                // Store reference in nodes to find the specific link easily later
+                nodes[sourceIdx].links.push(linkObj);
+                nodes[targetIdx].links.push(linkObj);
+
+                linksCreated++;
+            }
+
+            // Ensure graph is connected enough (handle isolated nodes simply by connecting them to 0)
+            nodes.forEach((node, idx) => {
+                if (node.neighbors.length === 0 && idx !== 0) {
+                    const target = 0;
+                    nodes[idx].neighbors.push(target);
+                    nodes[target].neighbors.push(idx);
+                    
+                    const p1 = nodes[idx].mesh.position;
+                    const p2 = nodes[target].mesh.position;
+                    const geometry = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+                    const material = linkMaterialTemplate.clone();
+                    const line = new THREE.Line(geometry, material);
+                    scene.add(line);
+                    
+                    const linkObj = { mesh: line, source: idx, target: target, activeDecay: 0 };
+                    links.push(linkObj);
+                    nodes[idx].links.push(linkObj);
+                    nodes[target].links.push(linkObj);
+                }
+            });
+
+            // 4. Walker Setup
+            const walkerGeo = new THREE.SphereGeometry(0.8, 8, 8);
+            const walkerMat = new THREE.MeshBasicMaterial({ color: COLOR_WALKER });
+            walkerMesh = new THREE.Mesh(walkerGeo, walkerMat);
+            scene.add(walkerMesh);
+
+            walkerLight = new THREE.PointLight(COLOR_WALKER, 2, 15);
+            walkerMesh.add(walkerLight);
+
+            // Initialize Walk
+            currentNodeIndex = Math.floor(Math.random() * NODE_COUNT);
+            visitNode(currentNodeIndex);
+            walkerMesh.position.copy(nodes[currentNodeIndex].mesh.position);
+            pickNextTarget();
+
+            // Resize Handler
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function visitNode(index) {
+            const node = nodes[index];
+            if (!node.isVisited) {
+                node.isVisited = true;
+                visitedCount++;
+                uiVisited.innerText = visitedCount;
+                
+                // Visual Change
+                node.mesh.material.color.setHex(COLOR_NODE_VISITED);
+                node.mesh.material.emissive.setHex(COLOR_NODE_VISITED);
+                node.mesh.material.emissiveIntensity = 0.8;
+                
+                // Scale up slightly animation
+                node.mesh.scale.set(1.5, 1.5, 1.5);
+            } else {
+                // Pulse effect for re-visited nodes
+                node.mesh.scale.set(1.2, 1.2, 1.2);
+            }
+        }
+
+        function pickNextTarget() {
+            const currentNode = nodes[currentNodeIndex];
+            const neighbors = currentNode.neighbors;
+
+            if (neighbors.length === 0) {
+                // Should not happen due to safety check in init, but safe fallback
+                currentNodeIndex = Math.floor(Math.random() * NODE_COUNT);
+                return;
+            }
+
+            // Random Walk Selection
+            targetNodeIndex = neighbors[Math.floor(Math.random() * neighbors.length)];
+            
+            // Find the link object connecting these two
+            const linkObj = currentNode.links.find(l => 
+                (l.source === currentNodeIndex && l.target === targetNodeIndex) ||
+                (l.target === currentNodeIndex && l.source === targetNodeIndex)
+            );
+            
+            currentLinkIndex = linkObj;
+            
+            // Highlight the chosen path immediately
+            if (currentLinkIndex) {
+                currentLinkIndex.activeDecay = 1.0; // Reset decay to max brightness
+                currentLinkIndex.mesh.material.opacity = 1.0;
+                currentLinkIndex.mesh.material.color.setHex(COLOR_LINK_ACTIVE);
+                currentLinkIndex.mesh.material.linewidth = 3;
+            }
+
+            walkProgress = 0;
+            totalSteps++;
+            uiSteps.innerText = totalSteps;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+
+            // 1. Walk Logic
+            if (targetNodeIndex !== null) {
+                walkProgress += WALKER_SPEED;
+
+                const p1 = nodes[currentNodeIndex].mesh.position;
+                const p2 = nodes[targetNodeIndex].mesh.position;
+
+                // Interpolate Walker Position
+                walkerMesh.position.lerpVectors(p1, p2, walkProgress);
+
+                // Arrival
+                if (walkProgress >= 1) {
+                    walkerMesh.position.copy(p2);
+                    currentNodeIndex = targetNodeIndex;
+                    visitNode(currentNodeIndex);
+                    pickNextTarget();
+                }
+            }
+
+            // 2. Visual Updates (Decay effects)
+            
+            // Update Links (fade out active trails)
+            links.forEach(link => {
+                if (link.activeDecay > 0) {
+                    // Start fading only if the walker isn't currently ON this link
+                    if (link !== currentLinkIndex || walkProgress >= 1) {
+                         link.activeDecay -= 0.02; // Fade speed
+                    }
+                    
+                    if (link.activeDecay <= 0) {
+                        link.activeDecay = 0;
+                        // Reset to dim
+                        link.mesh.material.color.setHex(COLOR_LINK_DIM);
+                        link.mesh.material.opacity = 0.1;
+                    } else {
+                        // Lerp color/opacity based on decay
+                        link.mesh.material.opacity = 0.1 + (0.9 * link.activeDecay);
+                        // Optional: Lerp color from cyan to dim gray could go here
+                    }
+                }
+            });
+
+            // Pulse Nodes (return to normal scale)
+            nodes.forEach(node => {
+                if (node.mesh.scale.x > 1.0) {
+                    node.mesh.scale.x -= 0.02;
+                    node.mesh.scale.y -= 0.02;
+                    node.mesh.scale.z -= 0.02;
+                }
+                // Clamp to 1.0
+                if (node.mesh.scale.x < 1.0) node.mesh.scale.set(1, 1, 1);
+            });
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
