@@ -376,28 +376,43 @@
         }
 
         function setupUI() {
+            // Speed - Immediate
             inpSpeed.addEventListener('input', (e) => {
                 config.walkerSpeed = parseFloat(e.target.value);
                 valSpeed.innerText = config.walkerSpeed.toFixed(3);
             });
+
+            // Structural Params - Regenerate on Change (Mouse Up)
+            const structuralInputs = [inpWalkers, inpClusters, inpInterlink, inpNodes, inpLinks];
+            structuralInputs.forEach(input => {
+                input.addEventListener('change', () => {
+                    refreshConfig();
+                    generateGraph();
+                });
+            });
+
+            // Structural UI Updates
             inpWalkers.addEventListener('input', (e) => valWalkers.innerText = e.target.value);
-            
             inpClusters.addEventListener('input', (e) => valClusters.innerText = e.target.value);
-            inpSpread.addEventListener('input', (e) => valSpread.innerText = e.target.value);
-            inpDist.addEventListener('input', (e) => valDist.innerText = e.target.value);
             inpInterlink.addEventListener('input', (e) => valInterlink.innerText = e.target.value + "%");
             inpNodes.addEventListener('input', (e) => valNodes.innerText = e.target.value);
             inpLinks.addEventListener('input', (e) => valLinks.innerText = e.target.value);
 
+            // Spatial Params - Real-time Update (Geometry Morphing)
+            inpSpread.addEventListener('input', (e) => {
+                valSpread.innerText = e.target.value;
+                config.clusterRadius = parseInt(e.target.value);
+                updateGeometryOnly(); // Move nodes live
+            });
+
+            inpDist.addEventListener('input', (e) => {
+                valDist.innerText = e.target.value;
+                config.clusterDistance = parseInt(e.target.value);
+                updateGeometryOnly(); // Move nodes live
+            });
+
             btnReset.addEventListener('click', () => {
-                config.nodeCount = parseInt(inpNodes.value);
-                config.linkCount = parseInt(inpLinks.value);
-                config.walkerCount = parseInt(inpWalkers.value);
-                config.clusterCount = parseInt(inpClusters.value);
-                config.clusterRadius = parseInt(inpSpread.value);
-                config.clusterDistance = parseInt(inpDist.value);
-                config.globalLinkChance = parseInt(inpInterlink.value) / 100;
-                
+                refreshConfig();
                 generateGraph();
             });
 
@@ -417,6 +432,57 @@
             });
 
             btnToggleUI.addEventListener('click', () => toggleUI());
+        }
+
+        function refreshConfig() {
+            config.nodeCount = parseInt(inpNodes.value);
+            config.linkCount = parseInt(inpLinks.value);
+            config.walkerCount = parseInt(inpWalkers.value);
+            config.clusterCount = parseInt(inpClusters.value);
+            config.clusterRadius = parseInt(inpSpread.value);
+            config.clusterDistance = parseInt(inpDist.value);
+            config.globalLinkChance = parseInt(inpInterlink.value) / 100;
+        }
+
+        // New function to morph geometry without regenerating connections
+        function updateGeometryOnly() {
+            const clusterCenters = [];
+            const angleStep = (Math.PI * 2) / config.clusterCount;
+            
+            // Recalculate centers
+            for(let i = 0; i < config.clusterCount; i++) {
+                const angle = i * angleStep;
+                // Preserve yOffset logic but we need to know the original random yOffset to match exactly
+                // Simplified: Re-calculate theoretical flat centers, assuming y-noise is part of node pos
+                clusterCenters.push(new THREE.Vector3(
+                    Math.cos(angle) * config.clusterDistance,
+                    0, // Y is handled by node's stored relative data
+                    Math.sin(angle) * config.clusterDistance
+                ));
+            }
+
+            nodes.forEach(node => {
+                const center = clusterCenters[node.clusterId % config.clusterCount];
+                
+                // Reconstruct position from stored polar coords
+                const r = config.clusterRadius * node.rRatio; // Use stored radius ratio
+                
+                // Calculate new position
+                const x = center.x + (r * Math.sin(node.phi) * Math.cos(node.theta));
+                const y = node.yBase + (r * Math.sin(node.phi) * Math.sin(node.theta)); // Preserve Y randomness
+                const z = center.z + (r * Math.cos(node.phi));
+
+                node.mesh.position.set(x, y, z);
+            });
+
+            // Update Links
+            links.forEach(link => {
+                const p1 = nodes[link.source].mesh.position;
+                const p2 = nodes[link.target].mesh.position;
+                link.mesh.geometry.setFromPoints([p1, p2]);
+                // Need to notify three.js that geometry changed
+                link.mesh.geometry.attributes.position.needsUpdate = true; 
+            });
         }
 
         function toggleImmersive() {
@@ -453,7 +519,7 @@
                     if (w.target !== null && nodes[w.target]) {
                          const p1 = nodes[w.current].mesh.position;
                          const p2 = nodes[w.target].mesh.position;
-                         if (p1.distanceToSquared(p2) > 0.001) { // FIXED: distanceToSq -> distanceToSquared
+                         if (p1.distanceToSquared(p2) > 0.001) { 
                              dir.subVectors(p2, p1).normalize();
                          }
                     }
@@ -488,9 +554,6 @@
         function clearScene() {
             nodes.forEach(n => {
                 scene.remove(n.mesh);
-                // NOTE: DO NOT call scene.remove(n.labelObj) here because it is a child of mesh, not scene.
-                // Removing n.mesh recursively removes its children from the scene graph.
-                
                 n.mesh.geometry.dispose();
                 n.mesh.material.dispose();
                 if (n.labelDiv && n.labelDiv.parentNode) {
@@ -508,7 +571,6 @@
 
             walkers.forEach(w => {
                 scene.remove(w.mesh);
-                // Correctly dispose of GROUP
                 w.mesh.traverse((child) => {
                     if (child.isMesh) {
                         if (child.geometry) child.geometry.dispose();
@@ -621,10 +683,10 @@
             
             for(let i = 0; i < config.clusterCount; i++) {
                 const angle = i * angleStep;
-                const yOffset = (Math.random() - 0.5) * 10; 
+                // Store base Y offsets for clusters (not updated in real-time drag to avoid jitter)
                 clusterCenters.push(new THREE.Vector3(
                     Math.cos(angle) * config.clusterDistance,
-                    yOffset,
+                    (Math.random() - 0.5) * 10, 
                     Math.sin(angle) * config.clusterDistance
                 ));
             }
@@ -635,7 +697,8 @@
 
                 const theta = Math.random() * Math.PI * 2;
                 const phi = Math.acos((Math.random() * 2) - 1);
-                const r = config.clusterRadius * Math.cbrt(Math.random());
+                const rRatio = Math.cbrt(Math.random()); // Store ratio (0-1) instead of absolute radius
+                const r = config.clusterRadius * rRatio;
 
                 const x = center.x + (r * Math.sin(phi) * Math.cos(theta));
                 const y = center.y + (r * Math.sin(phi) * Math.sin(theta));
@@ -664,6 +727,12 @@
                 nodes.push({
                     id: i,
                     clusterId: clusterIdx,
+                    // Store polar coords for real-time morphing
+                    theta: theta,
+                    phi: phi,
+                    rRatio: rRatio,
+                    yBase: center.y, // Keep the cluster's random height
+                    
                     mesh: mesh,
                     labelObj: label,
                     labelDiv: div,
