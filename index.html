@@ -3,23 +3,91 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Network Random Walk</title>
+    <title>3D Network Matrix Walk</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; }
+        
+        /* Matrix Styling for UI */
         #info {
             position: absolute;
             top: 10px;
             left: 10px;
-            color: white;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 10px;
+            color: #00ff00;
+            background: rgba(0, 10, 0, 0.85);
+            padding: 15px;
             pointer-events: none;
-            border: 1px solid #444;
+            border: 1px solid #00ff00;
+            box-shadow: 0 0 10px #00ff00;
+            border-radius: 2px;
             max-width: 300px;
+            z-index: 10;
         }
-        .stat { color: #00ffff; font-weight: bold; }
+        .stat { color: #ccffcc; font-weight: bold; text-shadow: 0 0 5px #00ff00; }
+        
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: #00ff00;
+            background: rgba(0, 10, 0, 0.85);
+            padding: 15px;
+            border: 1px solid #00ff00;
+            box-shadow: 0 0 10px #00ff00;
+            border-radius: 2px;
+            width: 250px;
+            z-index: 10;
+        }
+        
+        .control-group { margin-bottom: 12px; }
+        .control-group label { display: block; font-size: 0.8em; color: #008800; margin-bottom: 4px; text-transform: uppercase; }
+        .control-group input[type=range] { width: 100%; cursor: pointer; accent-color: #00ff00; }
+        .val-display { float: right; color: #ccffcc; font-size: 0.9em; }
+
+        button {
+            width: 100%;
+            padding: 8px;
+            background: #002200;
+            color: #00ff00;
+            border: 1px solid #00ff00;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        button:hover { background: #004400; box-shadow: 0 0 15px #00ff00; text-shadow: 0 0 5px #00ff00; }
+        button:active { background: #001100; }
+
+        h3 { margin-top: 0; border-bottom: 1px solid #004400; padding-bottom: 5px; font-size: 1.1em; letter-spacing: 2px; }
+
+        /* Node Labels */
+        .node-label {
+            font-family: 'Courier New', monospace;
+            color: rgba(0, 255, 0, 0.6);
+            font-size: 10px;
+            padding: 2px;
+            pointer-events: none;
+            user-select: none;
+            text-shadow: 0 0 2px #000;
+            transition: all 0.5s;
+        }
+        /* New Glitch Style */
+        .node-label.glitched {
+            color: #ff00ff !important; /* Force magenta */
+            text-shadow: 2px 0 0 #00ffff, -2px 0 0 #ff0000; /* Chromatic aberration */
+            font-weight: bold;
+        }
+        .node-label.visited {
+            color: #ffffff;
+            font-weight: bold;
+            font-size: 12px;
+            text-shadow: 0 0 5px #00ff00;
+            background: rgba(0, 20, 0, 0.5);
+            border: 1px solid #00ff00;
+        }
     </style>
-    <!-- Import Map for Three.js -->
+    <!-- Import Map for Three.js and Addons -->
     <script type="importmap">
         {
             "imports": {
@@ -31,54 +99,124 @@
 </head>
 <body>
     <div id="info">
-        <h3>Network Walker</h3>
-        <p>Nodes Visited: <span id="visited-count" class="stat">0</span> / 40</p>
-        <p>Steps Taken: <span id="step-count" class="stat">0</span></p>
-        <div style="font-size: 0.8em; color: #aaa;">
-            <p>• Green: Unvisited Node</p>
-            <p>• Pink/Purple: Visited Node</p>
-            <p>• White: Active Walker</p>
+        <h3>SYSTEM MONITOR</h3>
+        <p>NODES ACCESSED: <span id="visited-count" class="stat">0</span> / <span id="total-nodes-display">40</span></p>
+        <p>CYCLES: <span id="step-count" class="stat">0</span></p>
+        <div style="font-size: 0.8em; color: #00aa00; margin-top: 10px; border-top: 1px dashed #004400; padding-top: 5px;">
+            <p>[ ] SECURE NODE</p>
+            <p>[X] COMPROMISED</p>
+            <p>(O) TRACER PROGRAM</p>
         </div>
+    </div>
+
+    <div id="controls">
+        <h3>CONFIG</h3>
+        
+        <div class="control-group">
+            <label>Active Agents <span id="val-walkers" class="val-display">1</span></label>
+            <input type="range" id="inp-walkers" min="1" max="10" step="1" value="1">
+        </div>
+
+        <div class="control-group">
+            <label>Clock Speed <span id="val-speed" class="val-display">0.020</span></label>
+            <input type="range" id="inp-speed" min="0.001" max="0.1" step="0.001" value="0.020">
+        </div>
+
+        <div class="control-group">
+            <label>System Size <span id="val-nodes" class="val-display">40</span></label>
+            <input type="range" id="inp-nodes" min="10" max="150" step="5" value="40">
+        </div>
+
+        <div class="control-group">
+            <label>Connections <span id="val-links" class="val-display">400</span></label>
+            <input type="range" id="inp-links" min="50" max="2000" step="50" value="400">
+        </div>
+
+        <button id="btn-reset">REBOOT SYSTEM</button>
+        <button id="btn-immersive" style="margin-top: 10px;">JACK IN (Immersive)</button>
     </div>
 
     <script type="module">
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        
+        // Post Processing Imports
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-        // --- Configuration ---
-        const NODE_COUNT = 40;
-        const LINK_COUNT = 400;
-        const WORLD_RADIUS = 30;
-        const WALKER_SPEED = 0.015; // 0 to 1 (progress per frame)
+        // Label Renderer
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
-        // Colors
-        const COLOR_BG = 0x050505;
-        const COLOR_NODE_UNVISITED = 0x004400;
-        const COLOR_NODE_VISITED = 0xff0055;
-        const COLOR_LINK_DIM = 0xffffff;
-        const COLOR_LINK_ACTIVE = 0x00ffff;
-        const COLOR_WALKER = 0xffffff;
+        // --- Configuration Defaults ---
+        let config = {
+            nodeCount: 60, // Increased default slightly for better clusters
+            linkCount: 500,
+            walkerCount: 1,
+            worldRadius: 30,
+            walkerSpeed: 0.020
+        };
+
+        // Matrix Colors
+        const COLOR_BG = 0x000000;
+        const COLOR_NODE_UNVISITED = 0x001100; // Very dark green
+        const COLOR_NODE_VISITED = 0x008800;   // Darkened to reduce bloom intensity
+        const COLOR_WIRE_UNVISITED = 0x004400;
+        const COLOR_WIRE_VISITED = 0xccffcc;   // White-ish green
+        const COLOR_LINK_DIM = 0x005500;       // Brighter dark green for inactive
+        const COLOR_LINK_VISITED = 0x00ff00;   // New: Persistent glow for used paths
+        const COLOR_LINK_ACTIVE = 0x44ff44;    // Bright active link
+        const COLOR_WALKER = 0xffffff;         // Pure white hot
+
+        // Name Generation
+        const NODE_NAMES = [
+            "KERNEL", "DAEMON", "PROXY", "ROOT", "SHELL", "NEO", "TRINITY", "MORPHEUS", 
+            "CYPHER", "TANK", "DOZER", "SWITCH", "APOC", "MOUSE", "SMITH", "BROWN", 
+            "JONES", "ORACLE", "SERAPH", "KEYMAKER", "MERV", "PERSEPHONE", "GHOST", 
+            "SPARKS", "NIOBE", "LINK", "ZEE", "BANE", "VECTOR", "BINARY", "HEX", 
+            "BUFFER", "STACK", "HEAP", "HASH", "CRYPTO", "CIPHER", "ECHO", "PING", 
+            "PACKET", "FRAME", "LOG", "NULL", "VOID", "ZERO", "ONE", "AXIS", "GRID",
+            "SECTOR", "BLOCK", "CHAIN", "NODE", "GATE", "PORT", "SOCKET"
+        ];
+
+        // Glitch Characters
+        const GLITCH_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?/';
 
         // --- Global Variables ---
-        let scene, camera, renderer, controls;
-        let nodes = []; // Array of { mesh, id, neighbors: [], isVisited }
-        let links = []; // Array of { mesh, sourceNode, targetNode, geometry, material }
+        let scene, camera, renderer, labelRenderer, composer, controls;
+        let nodes = []; 
+        let links = []; 
         
-        // Random Walk State
-        let currentNodeIndex = 0;
-        let targetNodeIndex = null;
-        let currentLinkIndex = null;
-        let walkProgress = 0;
+        // Multi-Walker State
+        let walkers = []; // Array of walker objects
+        
+        // Global Stats
         let visitedCount = 0;
         let totalSteps = 0;
+        let isResetting = false; // Flag to prevent multiple resets during delay
         
+        // Camera State
+        let isImmersive = false;
+        let savedCameraPos = new THREE.Vector3();
+        let savedControlsTarget = new THREE.Vector3();
+        const immersiveDummy = new THREE.Object3D(); 
+
         // DOM Elements
         const uiVisited = document.getElementById('visited-count');
+        const uiTotalNodes = document.getElementById('total-nodes-display');
         const uiSteps = document.getElementById('step-count');
-
-        // Walker Visuals
-        let walkerMesh;
-        let walkerLight;
+        
+        const inpSpeed = document.getElementById('inp-speed');
+        const valSpeed = document.getElementById('val-speed');
+        const inpNodes = document.getElementById('inp-nodes');
+        const valNodes = document.getElementById('val-nodes');
+        const inpLinks = document.getElementById('inp-links');
+        const valLinks = document.getElementById('val-links');
+        const inpWalkers = document.getElementById('inp-walkers');
+        const valWalkers = document.getElementById('val-walkers');
+        const btnReset = document.getElementById('btn-reset');
+        const btnImmersive = document.getElementById('btn-immersive');
 
         init();
         animate();
@@ -87,92 +225,313 @@
             // 1. Setup Scene
             scene = new THREE.Scene();
             scene.background = new THREE.Color(COLOR_BG);
-            scene.fog = new THREE.FogExp2(COLOR_BG, 0.015);
+            scene.fog = new THREE.FogExp2(COLOR_BG, 0.010);
 
             camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.set(40, 20, 50);
 
+            // 2. Main WebGL Renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.toneMapping = THREE.ReinhardToneMapping;
             document.body.appendChild(renderer.domElement);
 
-            controls = new OrbitControls(camera, renderer.domElement);
+            // 3. Label Renderer
+            labelRenderer = new CSS2DRenderer();
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.domElement.style.position = 'absolute';
+            labelRenderer.domElement.style.top = '0px';
+            labelRenderer.domElement.style.pointerEvents = 'none';
+            document.body.appendChild(labelRenderer.domElement);
+
+            // 4. Post-Processing (Bloom)
+            const renderScene = new RenderPass(scene, camera);
+            const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+            bloomPass.threshold = 0;
+            bloomPass.strength = 0.6; 
+            bloomPass.radius = 0.5;
+
+            const outputPass = new OutputPass();
+
+            composer = new EffectComposer(renderer);
+            composer.addPass(renderScene);
+            composer.addPass(bloomPass);
+            composer.addPass(outputPass);
+
+            // 5. Controls
+            controls = new OrbitControls(camera, renderer.domElement); 
             controls.enableDamping = true;
             controls.autoRotate = true;
             controls.autoRotateSpeed = 0.5;
 
             // Lights
-            const ambientLight = new THREE.AmbientLight(0x404040);
+            const ambientLight = new THREE.AmbientLight(0x004400); 
             scene.add(ambientLight);
 
-            // 2. Generate Nodes
-            const nodeGeometry = new THREE.SphereGeometry(1.2, 16, 16);
+            // Grid
+            const gridHelper = new THREE.GridHelper(200, 50, 0x004400, 0x001100);
+            gridHelper.position.y = -40;
+            scene.add(gridHelper);
+
+            // 6. Setup UI & Graph
+            setupUI();
+            generateGraph();
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function setupUI() {
+            inpSpeed.addEventListener('input', (e) => {
+                config.walkerSpeed = parseFloat(e.target.value);
+                valSpeed.innerText = config.walkerSpeed.toFixed(3);
+            });
+            inpNodes.addEventListener('input', (e) => valNodes.innerText = e.target.value);
+            inpLinks.addEventListener('input', (e) => valLinks.innerText = e.target.value);
+            inpWalkers.addEventListener('input', (e) => valWalkers.innerText = e.target.value);
+
+            btnReset.addEventListener('click', () => {
+                config.nodeCount = parseInt(inpNodes.value);
+                config.linkCount = parseInt(inpLinks.value);
+                config.walkerCount = parseInt(inpWalkers.value);
+                generateGraph();
+            });
+
+            btnImmersive.addEventListener('click', toggleImmersive);
+        }
+
+        function toggleImmersive() {
+            isImmersive = !isImmersive;
+
+            if (isImmersive) {
+                btnImmersive.innerText = "EJECT (Exit)";
+                btnImmersive.style.background = "#440000";
+                btnImmersive.style.borderColor = "#ff0000";
+                btnImmersive.style.color = "#ffcccc";
+                btnImmersive.style.boxShadow = "0 0 10px #ff0000";
+
+                savedCameraPos.copy(camera.position);
+                savedControlsTarget.copy(controls.target);
+
+                controls.enabled = false;
+                
+                // Hide ALL walkers in immersive mode? 
+                // Let's only hide the one we are riding.
+                if (walkers.length > 0) {
+                    walkers[0].mesh.visible = false;
+                }
+            } else {
+                btnImmersive.innerText = "JACK IN (Immersive)";
+                btnImmersive.style.background = "#002200";
+                btnImmersive.style.borderColor = "#00ff00";
+                btnImmersive.style.color = "#00ff00";
+                btnImmersive.style.boxShadow = "none";
+
+                camera.position.copy(savedCameraPos);
+                controls.target.copy(savedControlsTarget);
+                
+                controls.enabled = true;
+                if (walkers.length > 0) {
+                    walkers[0].mesh.visible = true;
+                }
+            }
+        }
+
+        function clearScene() {
+            // Clean up THREE objects
+            nodes.forEach(n => {
+                scene.remove(n.mesh);
+                scene.remove(n.labelObj); 
+                n.mesh.geometry.dispose();
+                n.mesh.material.dispose();
+                if (n.labelDiv && n.labelDiv.parentNode) {
+                    n.labelDiv.parentNode.removeChild(n.labelDiv);
+                }
+            });
+            nodes = [];
+
+            links.forEach(l => {
+                scene.remove(l.mesh);
+                l.mesh.geometry.dispose();
+                l.mesh.material.dispose();
+            });
+            links = [];
+
+            // Clear Walkers
+            walkers.forEach(w => {
+                scene.remove(w.mesh);
+                w.mesh.geometry.dispose();
+                w.mesh.material.dispose();
+            });
+            walkers = [];
+        }
+
+        function createWalker() {
+            const walkerGeo = new THREE.SphereGeometry(0.5, 16, 16); 
+            const walkerMat = new THREE.MeshBasicMaterial({ color: COLOR_WALKER });
+            const mesh = new THREE.Mesh(walkerGeo, walkerMat);
+            scene.add(mesh);
+
+            const light = new THREE.PointLight(0x00ff00, 5, 20);
+            mesh.add(light);
+
+            // Start at random node
+            const startIdx = Math.floor(Math.random() * config.nodeCount);
+            mesh.position.copy(nodes[startIdx].mesh.position);
+            visitNode(startIdx);
+
+            return {
+                mesh: mesh,
+                light: light,
+                current: startIdx,
+                prev: null,
+                target: null,
+                link: null,
+                progress: 0
+            };
+        }
+
+        function generateGraph() {
+            clearScene();
+
+            isResetting = false; // Reset the flag
+            visitedCount = 0;
+            totalSteps = 0;
+            uiVisited.innerText = "0";
+            uiSteps.innerText = "0";
+            uiTotalNodes.innerText = config.nodeCount;
+
+            // 1. Generate Nodes (Clustered)
+            const nodeGeometry = new THREE.IcosahedronGeometry(1.2, 0); 
             
-            for (let i = 0; i < NODE_COUNT; i++) {
-                // Random position inside a sphere
+            // Define 3 Cluster Centers arranged in a triangle
+            const clusterCenters = [
+                new THREE.Vector3(18, 10, 0),
+                new THREE.Vector3(-18, 10, 0),
+                new THREE.Vector3(0, -20, 0)
+            ];
+            
+            const clusterRadius = 12; // Radius of each individual cluster
+
+            for (let i = 0; i < config.nodeCount; i++) {
+                // Assign node to a cluster
+                const clusterIdx = i % 3;
+                const center = clusterCenters[clusterIdx];
+
+                // Random position within the cluster sphere
                 const theta = Math.random() * Math.PI * 2;
                 const phi = Math.acos((Math.random() * 2) - 1);
-                const r = WORLD_RADIUS * Math.cbrt(Math.random()); // Cubic root for uniform distribution
+                const r = clusterRadius * Math.cbrt(Math.random());
 
-                const x = r * Math.sin(phi) * Math.cos(theta);
-                const y = r * Math.sin(phi) * Math.sin(theta);
-                const z = r * Math.cos(phi);
+                const x = center.x + (r * Math.sin(phi) * Math.cos(theta));
+                const y = center.y + (r * Math.sin(phi) * Math.sin(theta));
+                const z = center.z + (r * Math.cos(phi));
 
-                const material = new THREE.MeshStandardMaterial({
-                    color: COLOR_NODE_UNVISITED,
-                    roughness: 0.4,
-                    metalness: 0.8,
-                    emissive: COLOR_NODE_UNVISITED,
-                    emissiveIntensity: 0.2
+                const material = new THREE.MeshBasicMaterial({
+                    color: COLOR_WIRE_UNVISITED,
+                    wireframe: true,
+                    transparent: true,
+                    opacity: 0.5
                 });
 
                 const mesh = new THREE.Mesh(nodeGeometry, material);
                 mesh.position.set(x, y, z);
                 scene.add(mesh);
 
+                const name = NODE_NAMES[Math.floor(Math.random() * NODE_NAMES.length)] + "_" + Math.floor(Math.random() * 99);
+                const div = document.createElement('div');
+                div.className = 'node-label';
+                div.textContent = name;
+                
+                const label = new CSS2DObject(div);
+                label.position.set(0, 1.5, 0); 
+                mesh.add(label);
+
                 nodes.push({
                     id: i,
+                    clusterId: clusterIdx, // Store cluster ID for linking logic
                     mesh: mesh,
-                    neighbors: [], // Adjacency list stored as neighbor indices
-                    links: [],      // References to link objects
+                    labelObj: label,
+                    labelDiv: div,
+                    originalName: name, 
+                    neighbors: [],
+                    links: [],
                     isVisited: false
                 });
             }
 
-            // 3. Generate Links
-            // We want a dense graph, but we don't want duplicate links between same pairs
+            // 2. Generate Links (Biased towards intra-cluster)
             const connectionSet = new Set();
             const linkMaterialTemplate = new THREE.LineBasicMaterial({ 
                 color: COLOR_LINK_DIM, 
                 transparent: true, 
-                opacity: 0.1,
+                opacity: 0.3,
                 blending: THREE.AdditiveBlending 
             });
 
             let linksCreated = 0;
-            while (linksCreated < LINK_COUNT) {
-                const sourceIdx = Math.floor(Math.random() * NODE_COUNT);
-                const targetIdx = Math.floor(Math.random() * NODE_COUNT);
+            let attempts = 0;
+            const maxAttempts = config.linkCount * 10;
+
+            // Group nodes by cluster for easy access
+            const nodesByCluster = [[], [], []];
+            nodes.forEach(n => nodesByCluster[n.clusterId].push(n.id));
+
+            while (linksCreated < config.linkCount && attempts < maxAttempts) {
+                attempts++;
+                
+                let sourceIdx, targetIdx;
+                
+                // 85% chance to create a local link (same cluster)
+                // 15% chance to create a global link (cross cluster)
+                const isLocal = Math.random() < 0.85;
+
+                if (isLocal) {
+                    // Pick a random cluster
+                    const cIdx = Math.floor(Math.random() * 3);
+                    const clusterNodes = nodesByCluster[cIdx];
+                    if (clusterNodes.length < 2) continue; // Safety check
+
+                    // Pick two distinct nodes from this cluster
+                    const idx1 = Math.floor(Math.random() * clusterNodes.length);
+                    let idx2 = Math.floor(Math.random() * clusterNodes.length);
+                    while(idx1 === idx2) {
+                        idx2 = Math.floor(Math.random() * clusterNodes.length);
+                    }
+                    sourceIdx = clusterNodes[idx1];
+                    targetIdx = clusterNodes[idx2];
+                } else {
+                    // Pick any two distinct nodes from the whole pool (likely different clusters)
+                    // Or explicitly force different clusters:
+                    sourceIdx = Math.floor(Math.random() * config.nodeCount);
+                    targetIdx = Math.floor(Math.random() * config.nodeCount);
+                    // If we accidentally picked same cluster in a global attempt, that's fine, 
+                    // but we ensure nodes are distinct
+                    if (nodes[sourceIdx].clusterId === nodes[targetIdx].clusterId) {
+                        // Retry to encourage diversity, or just accept it. 
+                        // Let's force different clusters for better visuals.
+                        let safety = 0;
+                        while(nodes[sourceIdx].clusterId === nodes[targetIdx].clusterId && safety < 10) {
+                            targetIdx = Math.floor(Math.random() * config.nodeCount);
+                            safety++;
+                        }
+                    }
+                }
 
                 if (sourceIdx === targetIdx) continue;
 
-                // Create a unique key to check for existing connections (undirected)
                 const key = sourceIdx < targetIdx ? `${sourceIdx}-${targetIdx}` : `${targetIdx}-${sourceIdx}`;
                 if (connectionSet.has(key)) continue;
 
                 connectionSet.add(key);
 
-                // Register neighbors
                 nodes[sourceIdx].neighbors.push(targetIdx);
                 nodes[targetIdx].neighbors.push(sourceIdx);
 
-                // Create Visual Line
                 const p1 = nodes[sourceIdx].mesh.position;
                 const p2 = nodes[targetIdx].mesh.position;
                 
                 const geometry = new THREE.BufferGeometry().setFromPoints([p1, p2]);
-                // Clone material so we can light up individual links
                 const material = linkMaterialTemplate.clone(); 
                 
                 const line = new THREE.Line(geometry, material);
@@ -182,176 +541,244 @@
                     mesh: line,
                     source: sourceIdx,
                     target: targetIdx,
-                    activeDecay: 0 // Used for animation
+                    activeDecay: 0,
+                    isVisited: false 
                 };
 
                 links.push(linkObj);
-                
-                // Store reference in nodes to find the specific link easily later
                 nodes[sourceIdx].links.push(linkObj);
                 nodes[targetIdx].links.push(linkObj);
 
                 linksCreated++;
             }
 
-            // Ensure graph is connected enough (handle isolated nodes simply by connecting them to 0)
-            nodes.forEach((node, idx) => {
-                if (node.neighbors.length === 0 && idx !== 0) {
-                    const target = 0;
-                    nodes[idx].neighbors.push(target);
-                    nodes[target].neighbors.push(idx);
-                    
-                    const p1 = nodes[idx].mesh.position;
-                    const p2 = nodes[target].mesh.position;
-                    const geometry = new THREE.BufferGeometry().setFromPoints([p1, p2]);
-                    const material = linkMaterialTemplate.clone();
-                    const line = new THREE.Line(geometry, material);
-                    scene.add(line);
-                    
-                    const linkObj = { mesh: line, source: idx, target: target, activeDecay: 0 };
-                    links.push(linkObj);
-                    nodes[idx].links.push(linkObj);
-                    nodes[target].links.push(linkObj);
-                }
-            });
-
-            // 4. Walker Setup
-            const walkerGeo = new THREE.SphereGeometry(0.8, 8, 8);
-            const walkerMat = new THREE.MeshBasicMaterial({ color: COLOR_WALKER });
-            walkerMesh = new THREE.Mesh(walkerGeo, walkerMat);
-            scene.add(walkerMesh);
-
-            walkerLight = new THREE.PointLight(COLOR_WALKER, 2, 15);
-            walkerMesh.add(walkerLight);
-
-            // Initialize Walk
-            currentNodeIndex = Math.floor(Math.random() * NODE_COUNT);
-            visitNode(currentNodeIndex);
-            walkerMesh.position.copy(nodes[currentNodeIndex].mesh.position);
-            pickNextTarget();
-
-            // Resize Handler
-            window.addEventListener('resize', onWindowResize);
+            // Connectivity check - Ensure minimal spanning tree if disjoint
+            // Simple approach: connect cluster centers if isolated
+            // Or just rely on the density. With 15% global links, it's usually connected.
+            
+            // 3. Walker Setup (Multiple)
+            for (let i = 0; i < config.walkerCount; i++) {
+                const w = createWalker();
+                walkers.push(w);
+                walkerPickTarget(w);
+            }
         }
 
         function visitNode(index) {
             const node = nodes[index];
+            if (!node) return;
+
             if (!node.isVisited) {
                 node.isVisited = true;
                 visitedCount++;
                 uiVisited.innerText = visitedCount;
                 
-                // Visual Change
+                // Change Material to Lit Wireframe (Removed wireframe = false)
                 node.mesh.material.color.setHex(COLOR_NODE_VISITED);
-                node.mesh.material.emissive.setHex(COLOR_NODE_VISITED);
-                node.mesh.material.emissiveIntensity = 0.8;
+                node.mesh.material.opacity = 1.0;
+                // Optional: You could bump the emissive intensity if it were a standard material,
+                // but for BasicMaterial, color + opacity is enough.
                 
-                // Scale up slightly animation
+                node.labelDiv.classList.add('visited');
                 node.mesh.scale.set(1.5, 1.5, 1.5);
+
+                // Check for System Completion
+                if (visitedCount >= config.nodeCount && !isResetting) {
+                    isResetting = true;
+                    // Add a small delay before rebooting so we can see the full green network
+                    setTimeout(() => {
+                        generateGraph();
+                    }, 2000);
+                }
+
             } else {
-                // Pulse effect for re-visited nodes
                 node.mesh.scale.set(1.2, 1.2, 1.2);
             }
         }
 
-        function pickNextTarget() {
-            const currentNode = nodes[currentNodeIndex];
+        function walkerPickTarget(walker) {
+            // If resetting, stop picking new targets to avoid errors during cleanup
+            if (isResetting) return;
+
+            const currentNode = nodes[walker.current];
             const neighbors = currentNode.neighbors;
 
             if (neighbors.length === 0) {
-                // Should not happen due to safety check in init, but safe fallback
-                currentNodeIndex = Math.floor(Math.random() * NODE_COUNT);
+                walker.prev = null;
+                walker.current = Math.floor(Math.random() * config.nodeCount);
                 return;
             }
 
-            // Random Walk Selection
-            targetNodeIndex = neighbors[Math.floor(Math.random() * neighbors.length)];
+            // Selection Logic
+            let candidates = neighbors;
             
-            // Find the link object connecting these two
-            const linkObj = currentNode.links.find(l => 
-                (l.source === currentNodeIndex && l.target === targetNodeIndex) ||
-                (l.target === currentNodeIndex && l.source === targetNodeIndex)
-            );
-            
-            currentLinkIndex = linkObj;
-            
-            // Highlight the chosen path immediately
-            if (currentLinkIndex) {
-                currentLinkIndex.activeDecay = 1.0; // Reset decay to max brightness
-                currentLinkIndex.mesh.material.opacity = 1.0;
-                currentLinkIndex.mesh.material.color.setHex(COLOR_LINK_ACTIVE);
-                currentLinkIndex.mesh.material.linewidth = 3;
+            // Avoid backtracking
+            if (neighbors.length > 1 && walker.prev !== null) {
+                const forwardCandidates = neighbors.filter(nIdx => nIdx !== walker.prev);
+                if (forwardCandidates.length > 0) {
+                    candidates = forwardCandidates;
+                }
             }
 
-            walkProgress = 0;
+            walker.target = candidates[Math.floor(Math.random() * candidates.length)];
+            
+            // Link Highlight
+            const linkObj = currentNode.links.find(l => 
+                (l.source === walker.current && l.target === walker.target) ||
+                (l.target === walker.current && l.source === walker.target)
+            );
+            
+            walker.link = linkObj;
+            
+            if (walker.link) {
+                walker.link.isVisited = true; // Mark as visited permanently
+                walker.link.activeDecay = 1.0;
+                walker.link.mesh.material.opacity = 1.0;
+                walker.link.mesh.material.color.setHex(COLOR_LINK_ACTIVE);
+                walker.link.mesh.material.linewidth = 4;
+            }
+
+            walker.progress = 0;
             totalSteps++;
             uiSteps.innerText = totalSteps;
+        }
+
+        // New function to handle random label glitching
+        function updateGlitch() {
+            nodes.forEach(node => {
+                // Small chance (1%) per frame to trigger a glitch state change
+                if (Math.random() < 0.01) { 
+                    // If currently normal, make it glitch
+                    if (!node.labelDiv.classList.contains('glitched')) {
+                        let newText = node.originalName.split('');
+                        // Replace 1 to 3 characters randomly
+                        let numGlitches = Math.floor(Math.random() * 3) + 1;
+                        for(let i=0; i<numGlitches; i++) {
+                            let charIdx = Math.floor(Math.random() * newText.length);
+                            newText[charIdx] = GLITCH_CHARS[Math.floor(Math.random() * GLITCH_CHARS.length)];
+                        }
+                        node.labelDiv.textContent = newText.join('');
+                        node.labelDiv.classList.add('glitched');
+                    } 
+                    // If already glitched, reset to normal
+                    else {
+                        node.labelDiv.textContent = node.originalName;
+                        node.labelDiv.classList.remove('glitched');
+                    }
+                }
+            });
         }
 
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
         }
 
         function animate() {
             requestAnimationFrame(animate);
-            controls.update();
 
-            // 1. Walk Logic
-            if (targetNodeIndex !== null) {
-                walkProgress += WALKER_SPEED;
-
-                const p1 = nodes[currentNodeIndex].mesh.position;
-                const p2 = nodes[targetNodeIndex].mesh.position;
-
-                // Interpolate Walker Position
-                walkerMesh.position.lerpVectors(p1, p2, walkProgress);
-
-                // Arrival
-                if (walkProgress >= 1) {
-                    walkerMesh.position.copy(p2);
-                    currentNodeIndex = targetNodeIndex;
-                    visitNode(currentNodeIndex);
-                    pickNextTarget();
+            // 1. Camera Logic
+            if (isImmersive) {
+                // Attach to Walker[0]
+                const mainWalker = walkers[0];
+                if (mainWalker && mainWalker.target !== null && nodes[mainWalker.target]) {
+                    camera.position.copy(mainWalker.mesh.position);
+                    
+                    // Look at target
+                    immersiveDummy.position.copy(camera.position);
+                    immersiveDummy.lookAt(nodes[mainWalker.target].mesh.position);
+                    
+                    camera.quaternion.slerp(immersiveDummy.quaternion, 0.1);
                 }
+            } else {
+                controls.update();
             }
 
-            // 2. Visual Updates (Decay effects)
-            
-            // Update Links (fade out active trails)
-            links.forEach(link => {
-                if (link.activeDecay > 0) {
-                    // Start fading only if the walker isn't currently ON this link
-                    if (link !== currentLinkIndex || walkProgress >= 1) {
-                         link.activeDecay -= 0.02; // Fade speed
-                    }
+            // 2. Walk Logic (Iterate all walkers)
+            walkers.forEach(walker => {
+                if (walker.target !== null) {
+                    const p1 = nodes[walker.current].mesh.position;
+                    const p2 = nodes[walker.target].mesh.position;
                     
-                    if (link.activeDecay <= 0) {
-                        link.activeDecay = 0;
-                        // Reset to dim
-                        link.mesh.material.color.setHex(COLOR_LINK_DIM);
-                        link.mesh.material.opacity = 0.1;
-                    } else {
-                        // Lerp color/opacity based on decay
-                        link.mesh.material.opacity = 0.1 + (0.9 * link.activeDecay);
-                        // Optional: Lerp color from cyan to dim gray could go here
+                    // Calculate distance to ensure constant speed
+                    const dist = p1.distanceTo(p2);
+                    
+                    // Convert "percentage speed" to "world units speed"
+                    // Multiplied by 30 to keep the slider range (0.001-0.1) feeling similar to before
+                    const moveStep = (config.walkerSpeed * 30) / Math.max(0.1, dist);
+                    
+                    walker.progress += moveStep;
+
+                    walker.mesh.position.lerpVectors(p1, p2, walker.progress);
+
+                    if (walker.progress >= 1) {
+                        walker.mesh.position.copy(p2);
+                        
+                        walker.prev = walker.current;
+                        walker.current = walker.target;
+                        
+                        visitNode(walker.current);
+                        walkerPickTarget(walker);
                     }
                 }
             });
 
-            // Pulse Nodes (return to normal scale)
+            // 3. Visual Updates (Decay)
+            links.forEach(link => {
+                if (link.activeDecay > 0) {
+                    // Only decay if NO walker is currently on this link
+                    // This is slightly expensive loop-in-loop, but fine for 10 walkers
+                    let isOccupied = false;
+                    for(let w of walkers) {
+                        if (w.link === link && w.progress < 1) {
+                            isOccupied = true;
+                            break;
+                        }
+                    }
+
+                    if (!isOccupied) {
+                         link.activeDecay -= 0.02; 
+                    }
+                    
+                    if (link.activeDecay <= 0) {
+                        link.activeDecay = 0;
+                        
+                        // Check if visited to determine resting state
+                        if (link.isVisited) {
+                            link.mesh.material.color.setHex(COLOR_LINK_VISITED);
+                            link.mesh.material.opacity = 0.5; // Persistent glow
+                        } else {
+                            link.mesh.material.color.setHex(COLOR_LINK_DIM);
+                            link.mesh.material.opacity = 0.3;
+                        }
+                    } else {
+                        // Lerp opacity based on decay
+                        // Fade from 1.0 down to either 0.5 (visited) or 0.3 (unvisited)
+                        const baseOpacity = link.isVisited ? 0.5 : 0.3;
+                        link.mesh.material.opacity = baseOpacity + ((1.0 - baseOpacity) * link.activeDecay);
+                    }
+                }
+            });
+
             nodes.forEach(node => {
+                // Pulse scale back to normal
                 if (node.mesh.scale.x > 1.0) {
                     node.mesh.scale.x -= 0.02;
                     node.mesh.scale.y -= 0.02;
                     node.mesh.scale.z -= 0.02;
                 }
-                // Clamp to 1.0
                 if (node.mesh.scale.x < 1.0) node.mesh.scale.set(1, 1, 1);
             });
 
-            renderer.render(scene, camera);
+            // 4. Update Glitches
+            updateGlitch();
+
+            // 5. Render
+            composer.render();
+            labelRenderer.render(scene, camera);
         }
     </script>
 </body>
