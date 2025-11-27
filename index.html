@@ -36,6 +36,8 @@
             border-radius: 2px;
             width: 250px;
             z-index: 10;
+            max-height: 90vh;
+            overflow-y: auto;
         }
         
         .control-group { margin-bottom: 12px; }
@@ -74,9 +76,8 @@
         }
         /* New Glitch Style */
         .node-label.glitched {
-            color: #ff00ff !important; /* Force magenta */
-            text-shadow: 2px 0 0 #00ffff, -2px 0 0 #ff0000; /* Chromatic aberration */
-            font-weight: bold;
+            /* Removed color/shadow overrides for subtlety */
+            /* The effect is now purely the characters changing in the text */
         }
         .node-label.visited {
             color: #ffffff;
@@ -122,14 +123,39 @@
             <input type="range" id="inp-speed" min="0.001" max="0.1" step="0.001" value="0.020">
         </div>
 
-        <div class="control-group">
-            <label>System Size <span id="val-nodes" class="val-display">40</span></label>
-            <input type="range" id="inp-nodes" min="10" max="150" step="5" value="40">
-        </div>
+        <!-- System Architecture Section -->
+        <div style="border-top: 1px dashed #004400; margin: 10px 0; padding-top: 10px;">
+            <label style="color: #00ff00; margin-bottom: 8px;">TOPOLOGY</label>
+            
+            <div class="control-group">
+                <label>Cluster Count <span id="val-clusters" class="val-display">3</span></label>
+                <input type="range" id="inp-clusters" min="1" max="6" step="1" value="3">
+            </div>
 
-        <div class="control-group">
-            <label>Connections <span id="val-links" class="val-display">400</span></label>
-            <input type="range" id="inp-links" min="50" max="2000" step="50" value="400">
+            <div class="control-group">
+                <label>Cluster Spread <span id="val-spread" class="val-display">12</span></label>
+                <input type="range" id="inp-spread" min="5" max="30" step="1" value="12">
+            </div>
+            
+            <div class="control-group">
+                <label>Cluster Dist. <span id="val-dist" class="val-display">35</span></label>
+                <input type="range" id="inp-dist" min="10" max="60" step="5" value="35">
+            </div>
+
+            <div class="control-group">
+                <label>Interlink % <span id="val-interlink" class="val-display">10%</span></label>
+                <input type="range" id="inp-interlink" min="0" max="50" step="5" value="10">
+            </div>
+
+            <div class="control-group">
+                <label>System Size <span id="val-nodes" class="val-display">60</span></label>
+                <input type="range" id="inp-nodes" min="10" max="150" step="5" value="60">
+            </div>
+
+            <div class="control-group">
+                <label>Connections <span id="val-links" class="val-display">500</span></label>
+                <input type="range" id="inp-links" min="50" max="2000" step="50" value="500">
+            </div>
         </div>
 
         <button id="btn-reset">REBOOT SYSTEM</button>
@@ -151,11 +177,15 @@
 
         // --- Configuration Defaults ---
         let config = {
-            nodeCount: 60, // Increased default slightly for better clusters
+            nodeCount: 60,
             linkCount: 500,
             walkerCount: 1,
-            worldRadius: 30,
-            walkerSpeed: 0.020
+            walkerSpeed: 0.020,
+            // Topology Config
+            clusterCount: 3,
+            clusterRadius: 12,    // Spread
+            clusterDistance: 35,  // Separation
+            globalLinkChance: 0.10 // 10%
         };
 
         // Matrix Colors
@@ -165,7 +195,7 @@
         const COLOR_WIRE_UNVISITED = 0x004400;
         const COLOR_WIRE_VISITED = 0xccffcc;   // White-ish green
         const COLOR_LINK_DIM = 0x005500;       // Brighter dark green for inactive
-        const COLOR_LINK_VISITED = 0x00ff00;   // New: Persistent glow for used paths
+        const COLOR_LINK_VISITED = 0x00ff00;   // Persistent glow for used paths
         const COLOR_LINK_ACTIVE = 0x44ff44;    // Bright active link
         const COLOR_WALKER = 0xffffff;         // Pure white hot
 
@@ -194,7 +224,7 @@
         // Global Stats
         let visitedCount = 0;
         let totalSteps = 0;
-        let isResetting = false; // Flag to prevent multiple resets during delay
+        let isResetting = false; 
         
         // Camera State
         let isImmersive = false;
@@ -209,6 +239,17 @@
         
         const inpSpeed = document.getElementById('inp-speed');
         const valSpeed = document.getElementById('val-speed');
+        
+        // Topology Inputs
+        const inpClusters = document.getElementById('inp-clusters');
+        const valClusters = document.getElementById('val-clusters');
+        const inpSpread = document.getElementById('inp-spread');
+        const valSpread = document.getElementById('val-spread');
+        const inpDist = document.getElementById('inp-dist');
+        const valDist = document.getElementById('val-dist');
+        const inpInterlink = document.getElementById('inp-interlink');
+        const valInterlink = document.getElementById('val-interlink');
+
         const inpNodes = document.getElementById('inp-nodes');
         const valNodes = document.getElementById('val-nodes');
         const inpLinks = document.getElementById('inp-links');
@@ -228,7 +269,7 @@
             scene.fog = new THREE.FogExp2(COLOR_BG, 0.010);
 
             camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(40, 20, 50);
+            camera.position.set(40, 40, 60); // Moved camera back a bit to see wider clusters
 
             // 2. Main WebGL Renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -263,14 +304,14 @@
             controls = new OrbitControls(camera, renderer.domElement); 
             controls.enableDamping = true;
             controls.autoRotate = true;
-            controls.autoRotateSpeed = 0.5;
+            controls.autoRotateSpeed = 0.3; // Slower rotation for larger scene
 
             // Lights
             const ambientLight = new THREE.AmbientLight(0x004400); 
             scene.add(ambientLight);
 
-            // Grid
-            const gridHelper = new THREE.GridHelper(200, 50, 0x004400, 0x001100);
+            // Grid - increased size for spread clusters
+            const gridHelper = new THREE.GridHelper(300, 60, 0x004400, 0x001100);
             gridHelper.position.y = -40;
             scene.add(gridHelper);
 
@@ -282,18 +323,31 @@
         }
 
         function setupUI() {
+            // Live Updates
             inpSpeed.addEventListener('input', (e) => {
                 config.walkerSpeed = parseFloat(e.target.value);
                 valSpeed.innerText = config.walkerSpeed.toFixed(3);
             });
+            inpWalkers.addEventListener('input', (e) => valWalkers.innerText = e.target.value);
+            
+            // Topology UI Updates (Defer regeneration to button press)
+            inpClusters.addEventListener('input', (e) => valClusters.innerText = e.target.value);
+            inpSpread.addEventListener('input', (e) => valSpread.innerText = e.target.value);
+            inpDist.addEventListener('input', (e) => valDist.innerText = e.target.value);
+            inpInterlink.addEventListener('input', (e) => valInterlink.innerText = e.target.value + "%");
             inpNodes.addEventListener('input', (e) => valNodes.innerText = e.target.value);
             inpLinks.addEventListener('input', (e) => valLinks.innerText = e.target.value);
-            inpWalkers.addEventListener('input', (e) => valWalkers.innerText = e.target.value);
 
             btnReset.addEventListener('click', () => {
+                // Apply all configs
                 config.nodeCount = parseInt(inpNodes.value);
                 config.linkCount = parseInt(inpLinks.value);
                 config.walkerCount = parseInt(inpWalkers.value);
+                config.clusterCount = parseInt(inpClusters.value);
+                config.clusterRadius = parseInt(inpSpread.value);
+                config.clusterDistance = parseInt(inpDist.value);
+                config.globalLinkChance = parseInt(inpInterlink.value) / 100;
+                
                 generateGraph();
             });
 
@@ -315,8 +369,6 @@
 
                 controls.enabled = false;
                 
-                // Hide ALL walkers in immersive mode? 
-                // Let's only hide the one we are riding.
                 if (walkers.length > 0) {
                     walkers[0].mesh.visible = false;
                 }
@@ -338,7 +390,6 @@
         }
 
         function clearScene() {
-            // Clean up THREE objects
             nodes.forEach(n => {
                 scene.remove(n.mesh);
                 scene.remove(n.labelObj); 
@@ -357,7 +408,6 @@
             });
             links = [];
 
-            // Clear Walkers
             walkers.forEach(w => {
                 scene.remove(w.mesh);
                 w.mesh.geometry.dispose();
@@ -375,7 +425,6 @@
             const light = new THREE.PointLight(0x00ff00, 5, 20);
             mesh.add(light);
 
-            // Start at random node
             const startIdx = Math.floor(Math.random() * config.nodeCount);
             mesh.position.copy(nodes[startIdx].mesh.position);
             visitNode(startIdx);
@@ -394,34 +443,40 @@
         function generateGraph() {
             clearScene();
 
-            isResetting = false; // Reset the flag
+            isResetting = false; 
             visitedCount = 0;
             totalSteps = 0;
             uiVisited.innerText = "0";
             uiSteps.innerText = "0";
             uiTotalNodes.innerText = config.nodeCount;
 
-            // 1. Generate Nodes (Clustered)
+            // 1. Generate Nodes (Dynamic Clusters)
             const nodeGeometry = new THREE.IcosahedronGeometry(1.2, 0); 
             
-            // Define 3 Cluster Centers arranged in a triangle
-            const clusterCenters = [
-                new THREE.Vector3(18, 10, 0),
-                new THREE.Vector3(-18, 10, 0),
-                new THREE.Vector3(0, -20, 0)
-            ];
+            // Calculate Cluster Centers
+            const clusterCenters = [];
+            const angleStep = (Math.PI * 2) / config.clusterCount;
             
-            const clusterRadius = 12; // Radius of each individual cluster
+            for(let i = 0; i < config.clusterCount; i++) {
+                const angle = i * angleStep;
+                // Add some slight randomness to height (y) to make it 3D, but keep mainly flat
+                const yOffset = (Math.random() - 0.5) * 10; 
+                clusterCenters.push(new THREE.Vector3(
+                    Math.cos(angle) * config.clusterDistance,
+                    yOffset,
+                    Math.sin(angle) * config.clusterDistance
+                ));
+            }
 
             for (let i = 0; i < config.nodeCount; i++) {
-                // Assign node to a cluster
-                const clusterIdx = i % 3;
+                // Distribute nodes evenly among clusters
+                const clusterIdx = i % config.clusterCount;
                 const center = clusterCenters[clusterIdx];
 
-                // Random position within the cluster sphere
+                // Random position within the cluster sphere (Spread)
                 const theta = Math.random() * Math.PI * 2;
                 const phi = Math.acos((Math.random() * 2) - 1);
-                const r = clusterRadius * Math.cbrt(Math.random());
+                const r = config.clusterRadius * Math.cbrt(Math.random());
 
                 const x = center.x + (r * Math.sin(phi) * Math.cos(theta));
                 const y = center.y + (r * Math.sin(phi) * Math.sin(theta));
@@ -449,7 +504,7 @@
 
                 nodes.push({
                     id: i,
-                    clusterId: clusterIdx, // Store cluster ID for linking logic
+                    clusterId: clusterIdx,
                     mesh: mesh,
                     labelObj: label,
                     labelDiv: div,
@@ -460,7 +515,7 @@
                 });
             }
 
-            // 2. Generate Links (Biased towards intra-cluster)
+            // 2. Generate Links (Dynamic Density)
             const connectionSet = new Set();
             const linkMaterialTemplate = new THREE.LineBasicMaterial({ 
                 color: COLOR_LINK_DIM, 
@@ -473,8 +528,8 @@
             let attempts = 0;
             const maxAttempts = config.linkCount * 10;
 
-            // Group nodes by cluster for easy access
-            const nodesByCluster = [[], [], []];
+            // Group nodes by cluster
+            const nodesByCluster = Array.from({ length: config.clusterCount }, () => []);
             nodes.forEach(n => nodesByCluster[n.clusterId].push(n.id));
 
             while (linksCreated < config.linkCount && attempts < maxAttempts) {
@@ -482,40 +537,38 @@
                 
                 let sourceIdx, targetIdx;
                 
-                // 85% chance to create a local link (same cluster)
-                // 15% chance to create a global link (cross cluster)
-                const isLocal = Math.random() < 0.85;
+                // Determine if we want a Local or Global link
+                const isGlobal = Math.random() < config.globalLinkChance;
 
-                if (isLocal) {
-                    // Pick a random cluster
-                    const cIdx = Math.floor(Math.random() * 3);
+                if (!isGlobal) {
+                    // Local Link (Intra-cluster)
+                    const cIdx = Math.floor(Math.random() * config.clusterCount);
                     const clusterNodes = nodesByCluster[cIdx];
-                    if (clusterNodes.length < 2) continue; // Safety check
+                    if (clusterNodes.length < 2) continue;
 
-                    // Pick two distinct nodes from this cluster
                     const idx1 = Math.floor(Math.random() * clusterNodes.length);
                     let idx2 = Math.floor(Math.random() * clusterNodes.length);
-                    while(idx1 === idx2) {
-                        idx2 = Math.floor(Math.random() * clusterNodes.length);
-                    }
+                    while(idx1 === idx2) idx2 = Math.floor(Math.random() * clusterNodes.length);
+                    
                     sourceIdx = clusterNodes[idx1];
                     targetIdx = clusterNodes[idx2];
                 } else {
-                    // Pick any two distinct nodes from the whole pool (likely different clusters)
-                    // Or explicitly force different clusters:
-                    sourceIdx = Math.floor(Math.random() * config.nodeCount);
-                    targetIdx = Math.floor(Math.random() * config.nodeCount);
-                    // If we accidentally picked same cluster in a global attempt, that's fine, 
-                    // but we ensure nodes are distinct
-                    if (nodes[sourceIdx].clusterId === nodes[targetIdx].clusterId) {
-                        // Retry to encourage diversity, or just accept it. 
-                        // Let's force different clusters for better visuals.
-                        let safety = 0;
-                        while(nodes[sourceIdx].clusterId === nodes[targetIdx].clusterId && safety < 10) {
-                            targetIdx = Math.floor(Math.random() * config.nodeCount);
-                            safety++;
-                        }
+                    // Global Link (Inter-cluster)
+                    // Pick two different clusters
+                    const c1 = Math.floor(Math.random() * config.clusterCount);
+                    let c2 = Math.floor(Math.random() * config.clusterCount);
+                    // Force different clusters if we have more than 1
+                    if (config.clusterCount > 1) {
+                         while(c1 === c2) c2 = Math.floor(Math.random() * config.clusterCount);
                     }
+                    
+                    const nodes1 = nodesByCluster[c1];
+                    const nodes2 = nodesByCluster[c2];
+                    
+                    if(nodes1.length === 0 || nodes2.length === 0) continue;
+
+                    sourceIdx = nodes1[Math.floor(Math.random() * nodes1.length)];
+                    targetIdx = nodes2[Math.floor(Math.random() * nodes2.length)];
                 }
 
                 if (sourceIdx === targetIdx) continue;
@@ -552,11 +605,7 @@
                 linksCreated++;
             }
 
-            // Connectivity check - Ensure minimal spanning tree if disjoint
-            // Simple approach: connect cluster centers if isolated
-            // Or just rely on the density. With 15% global links, it's usually connected.
-            
-            // 3. Walker Setup (Multiple)
+            // 3. Walker Setup
             for (let i = 0; i < config.walkerCount; i++) {
                 const w = createWalker();
                 walkers.push(w);
@@ -573,11 +622,9 @@
                 visitedCount++;
                 uiVisited.innerText = visitedCount;
                 
-                // Change Material to Lit Wireframe (Removed wireframe = false)
+                // Change Material to Lit Wireframe
                 node.mesh.material.color.setHex(COLOR_NODE_VISITED);
                 node.mesh.material.opacity = 1.0;
-                // Optional: You could bump the emissive intensity if it were a standard material,
-                // but for BasicMaterial, color + opacity is enough.
                 
                 node.labelDiv.classList.add('visited');
                 node.mesh.scale.set(1.5, 1.5, 1.5);
@@ -585,7 +632,7 @@
                 // Check for System Completion
                 if (visitedCount >= config.nodeCount && !isResetting) {
                     isResetting = true;
-                    // Add a small delay before rebooting so we can see the full green network
+                    // Add delay before reboot
                     setTimeout(() => {
                         generateGraph();
                     }, 2000);
@@ -597,7 +644,6 @@
         }
 
         function walkerPickTarget(walker) {
-            // If resetting, stop picking new targets to avoid errors during cleanup
             if (isResetting) return;
 
             const currentNode = nodes[walker.current];
@@ -609,7 +655,6 @@
                 return;
             }
 
-            // Selection Logic
             let candidates = neighbors;
             
             // Avoid backtracking
@@ -631,7 +676,7 @@
             walker.link = linkObj;
             
             if (walker.link) {
-                walker.link.isVisited = true; // Mark as visited permanently
+                walker.link.isVisited = true; 
                 walker.link.activeDecay = 1.0;
                 walker.link.mesh.material.opacity = 1.0;
                 walker.link.mesh.material.color.setHex(COLOR_LINK_ACTIVE);
@@ -643,15 +688,11 @@
             uiSteps.innerText = totalSteps;
         }
 
-        // New function to handle random label glitching
         function updateGlitch() {
             nodes.forEach(node => {
-                // Small chance (1%) per frame to trigger a glitch state change
                 if (Math.random() < 0.01) { 
-                    // If currently normal, make it glitch
                     if (!node.labelDiv.classList.contains('glitched')) {
                         let newText = node.originalName.split('');
-                        // Replace 1 to 3 characters randomly
                         let numGlitches = Math.floor(Math.random() * 3) + 1;
                         for(let i=0; i<numGlitches; i++) {
                             let charIdx = Math.floor(Math.random() * newText.length);
@@ -660,7 +701,6 @@
                         node.labelDiv.textContent = newText.join('');
                         node.labelDiv.classList.add('glitched');
                     } 
-                    // If already glitched, reset to normal
                     else {
                         node.labelDiv.textContent = node.originalName;
                         node.labelDiv.classList.remove('glitched');
@@ -682,12 +722,10 @@
 
             // 1. Camera Logic
             if (isImmersive) {
-                // Attach to Walker[0]
                 const mainWalker = walkers[0];
                 if (mainWalker && mainWalker.target !== null && nodes[mainWalker.target]) {
                     camera.position.copy(mainWalker.mesh.position);
                     
-                    // Look at target
                     immersiveDummy.position.copy(camera.position);
                     immersiveDummy.lookAt(nodes[mainWalker.target].mesh.position);
                     
@@ -697,17 +735,14 @@
                 controls.update();
             }
 
-            // 2. Walk Logic (Iterate all walkers)
+            // 2. Walk Logic
             walkers.forEach(walker => {
                 if (walker.target !== null) {
                     const p1 = nodes[walker.current].mesh.position;
                     const p2 = nodes[walker.target].mesh.position;
                     
-                    // Calculate distance to ensure constant speed
+                    // Constant World Speed
                     const dist = p1.distanceTo(p2);
-                    
-                    // Convert "percentage speed" to "world units speed"
-                    // Multiplied by 30 to keep the slider range (0.001-0.1) feeling similar to before
                     const moveStep = (config.walkerSpeed * 30) / Math.max(0.1, dist);
                     
                     walker.progress += moveStep;
@@ -726,11 +761,9 @@
                 }
             });
 
-            // 3. Visual Updates (Decay)
+            // 3. Visual Updates
             links.forEach(link => {
                 if (link.activeDecay > 0) {
-                    // Only decay if NO walker is currently on this link
-                    // This is slightly expensive loop-in-loop, but fine for 10 walkers
                     let isOccupied = false;
                     for(let w of walkers) {
                         if (w.link === link && w.progress < 1) {
@@ -746,17 +779,14 @@
                     if (link.activeDecay <= 0) {
                         link.activeDecay = 0;
                         
-                        // Check if visited to determine resting state
                         if (link.isVisited) {
                             link.mesh.material.color.setHex(COLOR_LINK_VISITED);
-                            link.mesh.material.opacity = 0.5; // Persistent glow
+                            link.mesh.material.opacity = 0.5; 
                         } else {
                             link.mesh.material.color.setHex(COLOR_LINK_DIM);
                             link.mesh.material.opacity = 0.3;
                         }
                     } else {
-                        // Lerp opacity based on decay
-                        // Fade from 1.0 down to either 0.5 (visited) or 0.3 (unvisited)
                         const baseOpacity = link.isVisited ? 0.5 : 0.3;
                         link.mesh.material.opacity = baseOpacity + ((1.0 - baseOpacity) * link.activeDecay);
                     }
@@ -764,7 +794,6 @@
             });
 
             nodes.forEach(node => {
-                // Pulse scale back to normal
                 if (node.mesh.scale.x > 1.0) {
                     node.mesh.scale.x -= 0.02;
                     node.mesh.scale.y -= 0.02;
@@ -773,10 +802,7 @@
                 if (node.mesh.scale.x < 1.0) node.mesh.scale.set(1, 1, 1);
             });
 
-            // 4. Update Glitches
             updateGlitch();
-
-            // 5. Render
             composer.render();
             labelRenderer.render(scene, camera);
         }
